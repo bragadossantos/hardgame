@@ -1,7 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Routes, Route, Link } from 'react-router';
 import { io, Socket } from 'socket.io-client';
-import { APP_NAME, PongPayloadSchema, type PongPayload } from '@hardgame/shared';
+import {
+  APP_NAME,
+  LoginResponseSchema,
+  PongPayloadSchema,
+  type PongPayload,
+  type UserRole,
+} from '@hardgame/shared';
+import { useAuthStore } from './store/authStore.js';
 
 function Home({
   connected,
@@ -12,11 +19,12 @@ function Home({
   lastPong: PongPayload | null;
   onSendPing: () => void;
 }) {
+  const { user, clearSession, sessionReplacedMessage } = useAuthStore();
   const rtt = lastPong ? Math.max(0, lastPong.serverTime - lastPong.clientTime) : null;
 
   return (
     <div className="min-h-screen flex flex-col justify-between p-6 md:p-12 max-w-6xl mx-auto">
-      <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800 pb-6">
+      <header className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-slate-800 pb-6">
         <div>
           <span className="inline-block text-xs font-semibold uppercase tracking-widest text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 rounded-full px-3 py-1 mb-2">
             Competição Académica &amp; Laboratório 3D
@@ -27,15 +35,19 @@ function Home({
           </p>
         </div>
 
-        <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-xl px-4 py-3">
+        <div className="flex flex-wrap items-center gap-3 bg-slate-900 border border-slate-800 rounded-xl px-4 py-3">
           <span
             className={`h-3 w-3 rounded-full ${
-              connected ? 'bg-emerald-400 shadow-[0_0_12px_#34d399]' : 'bg-rose-500'
+              connected ? 'bg-emerald-400 shadow-[0_0_12px_#34d399]' : 'bg-amber-400'
             }`}
           />
           <div className="text-sm">
             <div className="font-medium text-slate-200">
-              {connected ? 'Servidor Ligado (Socket.IO)' : 'A aguardar servidor...'}
+              {connected
+                ? `Socket Autenticado (${user?.displayName ?? 'Ligado'})`
+                : user
+                  ? 'A ligar ao servidor...'
+                  : 'Inicia sessão para ligar ao Socket'}
             </div>
             {lastPong && (
               <div className="text-xs text-slate-400">
@@ -43,15 +55,32 @@ function Home({
               </div>
             )}
           </div>
-          <button
-            type="button"
-            onClick={onSendPing}
-            className="ml-2 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 transition cursor-pointer"
-          >
-            Testar Ping
-          </button>
+          {connected && (
+            <button
+              type="button"
+              onClick={onSendPing}
+              className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 transition cursor-pointer"
+            >
+              Testar Ping
+            </button>
+          )}
+          {user && (
+            <button
+              type="button"
+              onClick={() => clearSession()}
+              className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-rose-950/70 hover:bg-rose-900 text-rose-200 border border-rose-800 transition cursor-pointer"
+            >
+              Sair
+            </button>
+          )}
         </div>
       </header>
+
+      {sessionReplacedMessage && (
+        <div className="mt-6 rounded-xl bg-amber-950/60 border border-amber-700 px-4 py-3 text-amber-200 text-sm">
+          {sessionReplacedMessage}
+        </div>
+      )}
 
       <main className="my-12 grid grid-cols-1 md:grid-cols-2 gap-6">
         <Link
@@ -132,9 +161,179 @@ function Home({
       </main>
 
       <footer className="border-t border-slate-800 pt-6 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-2">
-        <span>Hardgame — Fase 0 (Esqueleto Monorepo + Socket.IO + Tailwind v4)</span>
+        <span>Hardgame — Fase 1 (SQLite + Drizzle + JWT Auth + Sessão Única)</span>
         <span>Funciona 100% em rede local (LAN)</span>
       </footer>
+    </div>
+  );
+}
+
+function AuthGate({
+  requiredRole,
+  title,
+  route,
+  description,
+}: {
+  requiredRole: UserRole;
+  title: string;
+  route: string;
+  description: string;
+}) {
+  const { user, setSession, clearSession, sessionReplacedMessage } = useAuthStore();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        setError(data.error ?? 'Falha ao iniciar sessão.');
+        return;
+      }
+      const parsed = LoginResponseSchema.parse(data);
+      setSession(parsed.token, parsed.user);
+      setUsername('');
+      setPassword('');
+    } catch {
+      setError('Não foi possível contactar o servidor.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 max-w-md mx-auto">
+        <div className="w-full rounded-2xl bg-slate-900 border border-slate-800 p-8 shadow-xl">
+          <span className="text-xs font-mono uppercase tracking-widest text-emerald-400 bg-slate-950 border border-slate-800 px-3 py-1 rounded-full">
+            Rota: {route}
+          </span>
+          <h1 className="text-2xl font-bold text-white mt-4 mb-1">{title}</h1>
+          <p className="text-sm text-slate-400 mb-6">
+            Inicia sessão para continuar ({requiredRole === 'admin' ? 'Administrador' : 'Jogador'}).
+          </p>
+
+          {sessionReplacedMessage && (
+            <div className="mb-4 rounded-xl bg-amber-950/70 border border-amber-700 px-3 py-2 text-xs text-amber-200">
+              {sessionReplacedMessage}
+            </div>
+          )}
+
+          {error && (
+            <div className="mb-4 rounded-xl bg-rose-950/70 border border-rose-800 px-3 py-2 text-xs text-rose-200">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">
+                Nome de utilizador
+              </label>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+                autoComplete="username"
+                className="w-full rounded-xl bg-slate-950 border border-slate-700 px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500"
+                placeholder={requiredRole === 'admin' ? 'admin' : 'ex: estudante01'}
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">
+                Palavra-passe
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                autoComplete="current-password"
+                className="w-full rounded-xl bg-slate-950 border border-slate-700 px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500"
+                placeholder="••••••••"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold text-sm transition cursor-pointer"
+            >
+              {loading ? 'A verificar...' : 'Iniciar Sessão'}
+            </button>
+          </form>
+
+          <div className="mt-6 pt-4 border-t border-slate-800 text-center">
+            <Link to="/" className="text-xs text-slate-400 hover:text-white transition">
+              ← Voltar ao Ecrã Inicial
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (requiredRole === 'admin' && user.role !== 'admin') {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center max-w-lg mx-auto">
+        <h1 className="text-2xl font-bold text-rose-400 mb-2">Acesso Restrito ao Administrador</h1>
+        <p className="text-slate-400 mb-6 text-sm">
+          Estás autenticado como <strong>{user.displayName}</strong> ({user.role}), mas este ecrã
+          requer privilégios de administrador.
+        </p>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => clearSession()}
+            className="px-4 py-2 rounded-xl bg-rose-900 hover:bg-rose-800 text-white text-sm font-semibold cursor-pointer"
+          >
+            Terminar Sessão
+          </button>
+          <Link
+            to="/"
+            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold"
+          >
+            ← Voltar
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center max-w-xl mx-auto">
+      <span className="text-xs font-mono uppercase tracking-widest text-emerald-400 bg-slate-900 border border-slate-800 px-3 py-1 rounded-full mb-4">
+        Rota: {route} • Sessão activa: {user.displayName} ({user.role})
+      </span>
+      <h1 className="text-3xl font-bold text-white mb-3">{title}</h1>
+      <p className="text-slate-400 mb-8 leading-relaxed">{description}</p>
+      <div className="flex gap-4">
+        <button
+          type="button"
+          onClick={() => clearSession()}
+          className="px-5 py-2.5 rounded-xl bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-800 font-semibold transition cursor-pointer"
+        >
+          Sair (Terminar Sessão)
+        </button>
+        <Link
+          to="/"
+          className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold transition"
+        >
+          ← Voltar ao Ecrã Inicial
+        </Link>
+      </div>
     </div>
   );
 }
@@ -166,32 +365,43 @@ function PlaceholderScreen({
 }
 
 export default function App() {
+  const { token, clearSession } = useAuthStore();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const [lastPong, setLastPong] = useState<PongPayload | null>(null);
 
   useEffect(() => {
+    if (!token) {
+      setConnected(false);
+      setSocket(null);
+      return;
+    }
+
     const s = io({
       path: '/socket.io',
       transports: ['websocket', 'polling'],
+      auth: { token },
     });
     setSocket(s);
 
     s.on('connect', () => {
-      console.log('[Socket.IO] Ligado ao servidor com ID:', s.id);
       setConnected(true);
-      s.emit('ping', { clientTime: Date.now(), message: 'ping inicial do navegador' });
+      s.emit('ping', { clientTime: Date.now(), message: 'ping inicial autenticado' });
     });
 
     s.on('disconnect', () => {
-      console.log('[Socket.IO] Desligado do servidor');
       setConnected(false);
+    });
+
+    s.on('session:replaced', (payload?: { reason?: string }) => {
+      clearSession(
+        payload?.reason ?? 'A tua sessão foi terminada porque entraste noutro computador ou separador.'
+      );
     });
 
     s.on('pong', (raw) => {
       const parsed = PongPayloadSchema.safeParse(raw);
       if (parsed.success) {
-        console.log('[Socket.IO] Evento pong recebido:', parsed.data);
         setLastPong(parsed.data);
       }
     });
@@ -199,18 +409,16 @@ export default function App() {
     return () => {
       s.disconnect();
     };
-  }, []);
+  }, [token, clearSession]);
 
   const handleSendPing = () => {
     if (!socket) return;
-    console.log('[Socket.IO] A enviar ping manual...');
     socket.emit(
       'ping',
       { clientTime: Date.now(), message: 'ping manual do utilizador' },
       (ackResponse: unknown) => {
         const parsed = PongPayloadSchema.safeParse(ackResponse);
         if (parsed.success) {
-          console.log('[Socket.IO] Ack pong recebido:', parsed.data);
           setLastPong(parsed.data);
         }
       }
@@ -228,10 +436,11 @@ export default function App() {
       <Route
         path="/jogar"
         element={
-          <PlaceholderScreen
+          <AuthGate
+            requiredRole="player"
             title="Modo Torneio — Jogador"
             route="/jogar"
-            description="Ecrã reservado para o início de sessão do jogador, espera no lobby e participação nas 3 etapas (implementado nas Fases 1, 3, 4 e 5)."
+            description="Sessão iniciada com sucesso. O lobby e as 3 etapas interactivas serão ligados nas Fases 2 a 5."
           />
         }
       />
@@ -248,10 +457,11 @@ export default function App() {
       <Route
         path="/admin"
         element={
-          <PlaceholderScreen
+          <AuthGate
+            requiredRole="admin"
             title="Painel de Administração"
             route="/admin"
-            description="Gestão de jogadores, criação de rondas, controlo em tempo real e auditoria de pontuações (implementado nas Fases 1 e 2)."
+            description="Sessão de administrador verificada. A gestão de jogadores, rondas e controlos ao vivo entram na Fase 2."
           />
         }
       />
@@ -268,4 +478,3 @@ export default function App() {
     </Routes>
   );
 }
-
