@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Routes, Route, Link } from 'react-router';
 import { io, Socket } from 'socket.io-client';
 import {
@@ -9,6 +9,8 @@ import {
   type UserRole,
 } from '@hardgame/shared';
 import { useAuthStore } from './store/authStore.js';
+import { AdminPanel } from './pages/AdminPanel.js';
+import { PlayerLobby } from './pages/PlayerLobby.js';
 
 function Home({
   connected,
@@ -161,7 +163,7 @@ function Home({
       </main>
 
       <footer className="border-t border-slate-800 pt-6 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-2">
-        <span>Hardgame — Fase 1 (SQLite + Drizzle + JWT Auth + Sessão Única)</span>
+        <span>Hardgame — Fase 2 (Painel de Administração, Lobby ao Vivo, Auditoria e CSV)</span>
         <span>Funciona 100% em rede local (LAN)</span>
       </footer>
     </div>
@@ -172,12 +174,12 @@ function AuthGate({
   requiredRole,
   title,
   route,
-  description,
+  children,
 }: {
   requiredRole: UserRole;
   title: string;
   route: string;
-  description: string;
+  children: ReactNode;
 }) {
   const { user, setSession, clearSession, sessionReplacedMessage } = useAuthStore();
   const [username, setUsername] = useState('');
@@ -312,30 +314,7 @@ function AuthGate({
     );
   }
 
-  return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center max-w-xl mx-auto">
-      <span className="text-xs font-mono uppercase tracking-widest text-emerald-400 bg-slate-900 border border-slate-800 px-3 py-1 rounded-full mb-4">
-        Rota: {route} • Sessão activa: {user.displayName} ({user.role})
-      </span>
-      <h1 className="text-3xl font-bold text-white mb-3">{title}</h1>
-      <p className="text-slate-400 mb-8 leading-relaxed">{description}</p>
-      <div className="flex gap-4">
-        <button
-          type="button"
-          onClick={() => clearSession()}
-          className="px-5 py-2.5 rounded-xl bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-800 font-semibold transition cursor-pointer"
-        >
-          Sair (Terminar Sessão)
-        </button>
-        <Link
-          to="/"
-          className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold transition"
-        >
-          ← Voltar ao Ecrã Inicial
-        </Link>
-      </div>
-    </div>
-  );
+  return <>{children}</>;
 }
 
 function PlaceholderScreen({
@@ -436,12 +415,9 @@ export default function App() {
       <Route
         path="/jogar"
         element={
-          <AuthGate
-            requiredRole="player"
-            title="Modo Torneio — Jogador"
-            route="/jogar"
-            description="Sessão iniciada com sucesso. O lobby e as 3 etapas interactivas serão ligados nas Fases 2 a 5."
-          />
+          <AuthGate requiredRole="player" title="Modo Torneio — Jogador" route="/jogar">
+            <PlayerLobby socket={socket} />
+          </AuthGate>
         }
       />
       <Route
@@ -457,12 +433,9 @@ export default function App() {
       <Route
         path="/admin"
         element={
-          <AuthGate
-            requiredRole="admin"
-            title="Painel de Administração"
-            route="/admin"
-            description="Sessão de administrador verificada. A gestão de jogadores, rondas e controlos ao vivo entram na Fase 2."
-          />
+          <AuthGate requiredRole="admin" title="Painel de Administração" route="/admin">
+            <AdminPanel socket={socket} />
+          </AuthGate>
         }
       />
       <Route

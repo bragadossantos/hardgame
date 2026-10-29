@@ -100,6 +100,178 @@ export const DEFAULT_SCORING_CONFIG = {
   moboModelPoints: DEFAULT_ROUND_CONFIG.moboModelPoints,
 } as const;
 
+// Fase 2: Esquemas de Gestão de Jogadores, Rondas, Pontos e Socket Events
+export const CreatePlayerSchema = z.object({
+  username: z
+    .string()
+    .trim()
+    .min(2, 'O nome de utilizador deve ter pelo menos 2 caracteres')
+    .max(40)
+    .regex(/^[a-zA-Z0-9_.-]+$/, 'Usa apenas letras, números, ponto, hífen ou underscore'),
+  displayName: z.string().trim().min(2, 'O nome de apresentação é obrigatório').max(80),
+  password: z.string().min(4, 'A palavra-passe deve ter pelo menos 4 caracteres').max(80),
+  institution: z.string().trim().max(100).nullable().optional(),
+});
+
+export type CreatePlayerInput = z.infer<typeof CreatePlayerSchema>;
+
+export const UpdatePlayerSchema = z.object({
+  displayName: z.string().trim().min(2).max(80).optional(),
+  password: z.string().min(4).max(80).optional(),
+  institution: z.string().trim().max(100).nullable().optional(),
+});
+
+export type UpdatePlayerInput = z.infer<typeof UpdatePlayerSchema>;
+
+export const ImportPlayersBulkSchema = z.object({
+  players: z.array(CreatePlayerSchema).min(1, 'A lista de importação está vazia'),
+});
+
+export type ImportPlayersBulkInput = z.infer<typeof ImportPlayersBulkSchema>;
+
+export const CreateRoundSchema = z.object({
+  name: z.string().trim().min(2, 'O nome da ronda é obrigatório').max(100),
+  allowedPlayerIds: z.array(z.number().int().positive()).default([]),
+  config: RoundConfigSchema.optional(),
+});
+
+export type CreateRoundInput = z.infer<typeof CreateRoundSchema>;
+
+export const UpdateRoundSchema = z.object({
+  name: z.string().trim().min(2).max(100).optional(),
+  status: RoundStatusSchema.optional(),
+  allowedPlayerIds: z.array(z.number().int().positive()).optional(),
+  config: RoundConfigSchema.partial().optional(),
+});
+
+export type UpdateRoundInput = z.infer<typeof UpdateRoundSchema>;
+
+export const PlayerJoinPayloadSchema = z.object({
+  roundId: z.number().int().positive(),
+});
+
+export type PlayerJoinPayload = z.infer<typeof PlayerJoinPayloadSchema>;
+
+export const AdminRoundActionSchema = z.object({
+  roundId: z.number().int().positive(),
+});
+
+export type AdminRoundAction = z.infer<typeof AdminRoundActionSchema>;
+
+export const AdminPlayerAllowSchema = z.object({
+  roundId: z.number().int().positive(),
+  userId: z.number().int().positive(),
+  allowed: z.boolean(),
+});
+
+export type AdminPlayerAllow = z.infer<typeof AdminPlayerAllowSchema>;
+
+export const AdminPlayerKickSchema = z.object({
+  roundId: z.number().int().positive(),
+  userId: z.number().int().positive(),
+  reason: z.string().trim().optional(),
+});
+
+export type AdminPlayerKick = z.infer<typeof AdminPlayerKickSchema>;
+
+export const AdminScoreAdjustSchema = z.object({
+  roundId: z.number().int().positive(),
+  userId: z.number().int().positive(),
+  delta: z.number().int().refine((v) => v !== 0, 'O ajuste de pontos não pode ser 0'),
+  reason: z.string().trim().min(3, 'O motivo é obrigatório (mínimo 3 caracteres)'),
+});
+
+export type AdminScoreAdjust = z.infer<typeof AdminScoreAdjustSchema>;
+
+export interface RoundPlayerEntry {
+  userId: number;
+  username: string;
+  displayName: string;
+  institution: string | null;
+  allowed: boolean;
+  connected: boolean;
+  joinedAt: number | null;
+  stage1: number;
+  stage2: number;
+  stage3: number;
+  total: number;
+  timeSpentMs: number;
+  firstTryHits: number;
+}
+
+export interface RoundSnapshot {
+  id: number;
+  name: string;
+  status: RoundStatus;
+  currentStage: number;
+  stageStartedAt: number | null;
+  stageEndsAt: number | null;
+  pausedRemainingMs: number | null;
+  serverNow: number;
+  config: RoundConfig;
+  players: RoundPlayerEntry[];
+}
+
+export interface CsvPreviewRow {
+  lineNumber: number;
+  raw: string;
+  data?: CreatePlayerInput;
+  error?: string;
+}
+
+export function parsePlayersCsv(csvText: string): CsvPreviewRow[] {
+  const lines = csvText.split(/\r?\n/);
+  const rows: CsvPreviewRow[] = [];
+
+  lines.forEach((rawLine, idx) => {
+    const trimmed = rawLine.trim();
+    if (!trimmed) return;
+
+    // Ignorar cabeçalho na linha 1 se começar por username
+    if (idx === 0 && /^username\s*[,;]/i.test(trimmed)) {
+      return;
+    }
+
+    const separator = trimmed.includes(';') && !trimmed.includes(',') ? ';' : ',';
+    const cols = trimmed.split(separator).map((c) => c.trim());
+
+    if (cols.length < 3) {
+      rows.push({
+        lineNumber: idx + 1,
+        raw: rawLine,
+        error: 'Formato inválido. Esperado: username,display_name,password,institution',
+      });
+      return;
+    }
+
+    const [username = '', displayName = '', password = '', institution = ''] = cols;
+    const parsed = CreatePlayerSchema.safeParse({
+      username,
+      displayName,
+      password,
+      institution: institution || null,
+    });
+
+    if (!parsed.success) {
+      const firstErr = parsed.error.issues[0]?.message ?? 'Dados inválidos';
+      rows.push({
+        lineNumber: idx + 1,
+        raw: rawLine,
+        error: firstErr,
+      });
+      return;
+    }
+
+    rows.push({
+      lineNumber: idx + 1,
+      raw: rawLine,
+      data: parsed.data,
+    });
+  });
+
+  return rows;
+}
+
 export interface CatalogPartSeed {
   slug: string;
   namePt: string;
