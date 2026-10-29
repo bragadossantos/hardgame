@@ -1,0 +1,26 @@
+{
+  "name": "hardgame",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Jogo 3D de aprendizagem e competição em hardware de computadores",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "setup": "npm run setup --workspace=@hardgame/server",
+    "dev": "concurrently -n \"SERVER,WEB\" -c \"cyan,magenta\" \"npm run dev --workspace=@hardgame/server\" \"npm run dev --workspace=@hardgame/web\"",
+    "build": "npm run build --workspace=@hardgame/shared && npm run build --workspace=@hardgame/web && npm run build --workspace=@hardgame/server",
+    "start": "npm run start --workspace=@hardgame/server",
+    "test": "vitest run",
+    "models:optimize": "node scripts/optimize-models.mjs"
+  },
+  "devDependencies": {
+    "@gltf-transform/cli": "^4.0.0",
+    "@types/node": "^22.10.0",
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
+}
+
